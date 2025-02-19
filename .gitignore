@@ -1,0 +1,12 @@
+/vendor/
+/composer.lock
+.env
+credentials.json
+token.json
+.idea/
+.vscode/
+*.log
+.DS_Store
+.windsurfrules
+devbook.md
+TODO.md
