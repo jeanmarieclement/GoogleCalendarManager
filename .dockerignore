@@ -1,0 +1,34 @@
+# Git
+.git
+.gitignore
+
+# Docker
+.docker
+docker-compose*.yml
+Dockerfile*
+
+# PHPUnit
+.phpunit.result.cache
+phpunit.xml
+
+# Composer
+vendor/*
+!vendor/.gitkeep
+
+# IDE files
+.idea
+.vscode
+
+# Environment files
+.env
+
+# Tokens (for security)
+token.json
+
+# Logs
+logs/*
+!logs/.gitkeep
+
+# Cache
+cache/*
+!cache/.gitkeep

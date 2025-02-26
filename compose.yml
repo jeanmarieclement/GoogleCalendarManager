@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: google-calendar-manager
+    volumes:
+      - .:/var/www/html
+      # Exclude vendor directory to avoid conflicts with container
+      - /var/www/html/vendor
+    ports:
+      - "8080:80"
+    environment:
+      - PHP_MEMORY_LIMIT=256M
+      - APACHE_DOCUMENT_ROOT=/var/www/html/examples
+    restart: unless-stopped
+    command: >
+      bash -c "
+        # Set Apache document root correctly
+        sed -i 's|DocumentRoot /var/www/html.*|DocumentRoot /var/www/html/examples|g' /etc/apache2/sites-available/000-default.conf &&
+        # Create calendar-config.php from template if it doesn't exist
+        if [ ! -f /var/www/html/config/calendar-config.php ]; then
+          cp /var/www/html/config/calendar-config.template.php /var/www/html/config/calendar-config.php
+        fi &&
+        # Ensure token directory is writable
+        mkdir -p /var/www/html/token &&
+        chmod -R 777 /var/www/html/token &&
+        # Create logs directory
+        mkdir -p /var/www/html/logs &&
+        chmod -R 777 /var/www/html/logs &&
+        # Create cache directory
+        mkdir -p /var/www/html/cache &&
+        chmod -R 777 /var/www/html/cache &&
+        # Start Apache
+        apache2-foreground
+      "
+
+  # Optional: PHPMyAdmin service if you need a database
+  # phpmyadmin:
+  #   image: phpmyadmin/phpmyadmin
+  #   container_name: phpmyadmin-calendar
+  #   environment:
+  #     - PMA_ARBITRARY=1
+  #   ports:
+  #     - "8081:80"
+  #   depends_on:
+  #     - db
+  
+  # Optional: MySQL service if you need a database
+  # db:
+  #   image: mysql:5.7
+  #   container_name: mysql-calendar
+  #   environment:
+  #     - MYSQL_ROOT_PASSWORD=root_password
+  #     - MYSQL_DATABASE=calendar_db
+  #     - MYSQL_USER=calendar_user
+  #     - MYSQL_PASSWORD=calendar_password
+  #   volumes:
+  #     - db_data:/var/lib/mysql
+  #   ports:
+  #     - "3306:3306"
+
+# Optional: Volume for database persistence
+# volumes:
+#   db_data:

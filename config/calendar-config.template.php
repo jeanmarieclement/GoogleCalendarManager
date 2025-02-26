@@ -12,15 +12,24 @@ return [
     |
     */
 
-    // Path to the credentials.json file downloaded from Google Cloud Console
-    'credentials_path' => __DIR__ . '/../credentials.json',
+    // OAuth 2.0 Client Credentials (from credentials.json)
+    'client_id' => 'YOUR_CLIENT_ID',
+    'client_secret' => 'YOUR_CLIENT_SECRET',
+    'redirect_uri' => 'urn:ietf:wg:oauth:2.0:oob', // For desktop applications
 
-    // Path where the OAuth token will be stored
-    'token_path' => __DIR__ . '/../token.json',
-
-    // Default calendar ID (optional)
-    // Use 'primary' for the user's primary calendar, or a specific calendar ID
+    // Optional: Default calendar ID
     'default_calendar_id' => 'primary',
+
+    // OAuth 2.0 Scopes
+    'scopes' => [
+        'https://www.googleapis.com/auth/calendar',
+        // Add additional scopes as needed
+        // 'https://www.googleapis.com/auth/calendar.readonly', // Read-only access
+        // 'https://www.googleapis.com/auth/calendar.events', // Manage events only
+    ],
+
+    // Token Storage
+    'token_path' => __DIR__ . '/../token.json',
 
     // Application name as shown to Google and users
     'application_name' => 'My Calendar Application',
