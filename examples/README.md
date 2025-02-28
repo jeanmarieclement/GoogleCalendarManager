@@ -97,3 +97,149 @@ The example includes proper error handling and will display meaningful error mes
 - Invalid calendar or event IDs
 - Missing required fields
 - Authentication failures
+
+## Google Calendar Manager Example Application
+
+This example demonstrates how to use the Google Calendar Manager library to create a web application that interacts with Google Calendar.
+
+### Features
+
+- 🔐 OAuth 2.0 Authentication with Google Calendar API
+- 📅 Calendar Selection from user's available calendars
+- 📆 Event Management:
+  - View events in a date range
+  - Create new events (with date/time or all-day)
+  - Delete existing events
+- 🎨 Modern UI with Bootstrap 5
+- 📱 Responsive design for all devices
+- ⚡ Real-time updates
+- 🔄 Automatic token refresh
+
+### Requirements
+
+- PHP 7.4 or higher
+- Composer for dependency management
+- Google Cloud Platform account with Calendar API enabled
+- OAuth 2.0 credentials (client ID and secret)
+- SSL recommended for production use
+
+### Installation
+
+1. Install dependencies:
+```bash
+composer install
+```
+
+2. Configure OAuth credentials:
+   - Copy `config/calendar-config.template.php` to `config/calendar-config.php`
+   - Add your Google OAuth credentials:
+     - Client ID
+     - Client Secret
+     - Redirect URI (use `urn:ietf:wg:oauth:2.0:oob` for testing)
+
+3. Set up directories:
+```bash
+mkdir -p token
+chmod 755 token
+mkdir -p logs
+chmod 755 logs
+```
+
+### Usage
+
+1. Start a PHP development server:
+```bash
+php -S localhost:8080 -t examples/
+```
+
+2. Open your browser and navigate to:
+```
+http://localhost:8080/calendar-example.php
+```
+
+3. Follow the OAuth authentication flow:
+   - Click "Authenticate with Google"
+   - Grant the required permissions
+   - The token will be automatically saved
+
+### Code Structure
+
+- `calendar-example.php`: Main application file
+  - OAuth flow handling
+  - Calendar selection
+  - Event management interface
+  - Date formatting utilities
+
+### Security Considerations
+
+- Always validate user input
+- Store tokens securely
+- Use HTTPS in production
+- Keep OAuth credentials confidential
+- Implement proper session management
+
+### Customization
+
+You can customize the example by:
+
+1. Modifying the UI:
+   - Edit the Bootstrap classes
+   - Change the date picker configuration
+   - Adjust the layout structure
+
+2. Adding features:
+   - Event editing
+   - Recurring events
+   - Calendar sharing
+   - Event filtering
+   - Advanced search
+
+3. Enhancing security:
+   - Add user authentication
+   - Implement CSRF protection
+   - Add request rate limiting
+
+### Troubleshooting
+
+1. Authentication Issues:
+   - Verify OAuth credentials
+   - Check redirect URI configuration
+   - Ensure proper token storage permissions
+
+2. Event Display Problems:
+   - Check date format compatibility
+   - Verify timezone settings
+   - Review API quota limits
+
+3. General Issues:
+   - Check PHP error logs
+   - Verify file permissions
+   - Ensure all dependencies are installed
+
+### Best Practices
+
+1. Error Handling:
+   - Implement proper exception handling
+   - Show user-friendly error messages
+   - Log errors for debugging
+
+2. Performance:
+   - Cache API responses when possible
+   - Limit the number of events fetched
+   - Use pagination for large datasets
+
+3. User Experience:
+   - Provide clear feedback
+   - Implement loading indicators
+   - Add confirmation dialogs for destructive actions
+
+### Support
+
+For issues and questions:
+- Check the [GitHub repository](https://github.com/yourusername/google-calendar-manager)
+- Review the [Google Calendar API documentation](https://developers.google.com/calendar)
+- Submit issues through the project's issue tracker
+
+### License
+
+This example is part of the Google Calendar Manager library and is released under the MIT License. See the LICENSE file for details.

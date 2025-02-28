@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Services\GoogleCalendar;
 
+use DateTime;
+use Exception;
 use Google_Client;
 use Google_Service_Calendar;
 use Google_Service_Calendar_Event;
@@ -31,6 +33,26 @@ class GoogleCalendarManager
     private $config;
 
     /**
+     * @var resource|null Log file handle
+     */
+    private $logHandle = null;
+
+    /**
+     * @var string Log level
+     */
+    private $logLevel = 'ERROR';
+
+    /**
+     * @var array Log level priorities
+     */
+    private $logLevels = [
+        'DEBUG' => 0,
+        'INFO' => 1,
+        'WARNING' => 2,
+        'ERROR' => 3
+    ];
+
+    /**
      * GoogleCalendarManager constructor.
      *
      * @param array $config Configuration array containing client_id, client_secret, etc.
@@ -42,7 +64,9 @@ class GoogleCalendarManager
         $this->validateConfig($config);
         $this->config = $config;
         $this->calendarId = $defaultCalendarId ?? 'primary';
+        $this->initializeLogging();
         $this->initializeClient();
+        $this->log('INFO', 'GoogleCalendarManager initialized');
     }
 
     /**
@@ -59,6 +83,59 @@ class GoogleCalendarManager
                 throw new RuntimeException("Missing required configuration: {$key}");
             }
         }
+    }
+
+    /**
+     * Initialize logging
+     */
+    private function initializeLogging()
+    {
+        if (!isset($this->config['logging']) || !$this->config['logging']['enabled']) {
+            return;
+        }
+
+        $this->logLevel = strtoupper($this->config['logging']['level'] ?? 'ERROR');
+        
+        if (!in_array($this->logLevel, array_keys($this->logLevels))) {
+            $this->logLevel = 'ERROR';
+        }
+
+        $logPath = $this->config['logging']['path'] ?? dirname(__DIR__, 2) . '/logs/calendar.log';
+        $logDir = dirname($logPath);
+        
+        if (!is_dir($logDir)) {
+            mkdir($logDir, 0755, true);
+        }
+
+        $this->logHandle = fopen($logPath, 'a');
+        $this->log('DEBUG', 'Logging initialized with level: ' . $this->logLevel);
+    }
+
+    /**
+     * Log a message
+     *
+     * @param string $level Log level (DEBUG, INFO, WARNING, ERROR)
+     * @param string $message Message to log
+     * @param array $context Additional context data
+     */
+    private function log(string $level, string $message, array $context = []): void
+    {
+        if (!$this->logHandle) {
+            return;
+        }
+
+        $level = strtoupper($level);
+        
+        // Check if we should log this level
+        if ($this->logLevels[$level] < $this->logLevels[$this->logLevel]) {
+            return;
+        }
+
+        $timestamp = (new \DateTime())->format('Y-m-d H:i:s');
+        $contextStr = !empty($context) ? ' ' . json_encode($context) : '';
+        $logMessage = "[$timestamp] [$level] $message$contextStr" . PHP_EOL;
+        
+        fwrite($this->logHandle, $logMessage);
     }
 
     /**
@@ -79,12 +156,14 @@ class GoogleCalendarManager
             $this->client->setHttpClient(
                 new \GuzzleHttp\Client(['verify' => false])
             );
+            $this->log('WARNING', 'SSL verification disabled - NOT SECURE FOR PRODUCTION');
         }
 
         // Try to load existing token
         if (isset($this->config['token_path']) && file_exists($this->config['token_path'])) {
             $accessToken = json_decode(file_get_contents($this->config['token_path']), true);
             $this->client->setAccessToken($accessToken);
+            $this->log('DEBUG', 'Loaded existing token');
         }
 
         $this->service = new Google_Service_Calendar($this->client);
@@ -97,6 +176,7 @@ class GoogleCalendarManager
      */
     public function getAuthUrl(): string
     {
+        $this->log('DEBUG', 'Generating auth URL');
         return $this->client->createAuthUrl();
     }
 
@@ -108,6 +188,8 @@ class GoogleCalendarManager
      */
     public function handleAuthCallback(string $authCode): void
     {
+        $this->log('DEBUG', 'Handling auth callback');
+        
         try {
             $accessToken = $this->client->fetchAccessTokenWithAuthCode($authCode);
             $this->client->setAccessToken($accessToken);
@@ -117,10 +199,13 @@ class GoogleCalendarManager
                 if (!file_put_contents($this->config['token_path'], json_encode($accessToken))) {
                     throw new RuntimeException('Failed to save the token');
                 }
+                $this->log('DEBUG', 'Token saved to: ' . $this->config['token_path']);
             }
         } catch (\Exception $e) {
+            $this->log('ERROR', 'Authentication failed: ' . $e->getMessage());
             throw new RuntimeException('Error handling auth callback: ' . $e->getMessage());
         }
+        $this->log('INFO', 'Authentication successful');
     }
 
     /**
@@ -130,28 +215,38 @@ class GoogleCalendarManager
      */
     public function isAuthenticated(): bool
     {
-        return $this->client->getAccessToken() !== null;
-    }
-
-    /**
-     * Refreshes the access token if it's expired
-     *
-     * @throws RuntimeException
-     */
-    private function refreshTokenIfNeeded(): void
-    {
-        if ($this->client->isAccessTokenExpired()) {
-            if ($this->client->getRefreshToken()) {
-                $this->client->fetchAccessTokenWithRefreshToken($this->client->getRefreshToken());
-                
-                // Save the new token
-                if (isset($this->config['token_path'])) {
-                    file_put_contents($this->config['token_path'], json_encode($this->client->getAccessToken()));
-                }
-            } else {
-                throw new RuntimeException('Refresh token not available. Re-authentication required.');
-            }
+        if (!$this->client->getAccessToken()) {
+            $this->log('DEBUG', 'Not authenticated: No access token');
+            return false;
         }
+
+        if ($this->client->isAccessTokenExpired()) {
+            $this->log('DEBUG', 'Access token expired');
+            
+            // Try to refresh the token
+            if ($this->client->getRefreshToken()) {
+                $this->log('DEBUG', 'Attempting to refresh token');
+                try {
+                    $this->client->fetchAccessTokenWithRefreshToken($this->client->getRefreshToken());
+                    // Save the new token
+                    if (isset($this->config['token_path'])) {
+                        file_put_contents($this->config['token_path'], json_encode($this->client->getAccessToken()));
+                        $this->log('DEBUG', 'Token saved to: ' . $this->config['token_path']);
+                    }
+                    $this->log('INFO', 'Token refreshed successfully');
+                    return true;
+                } catch (Exception $e) {
+                    $this->log('ERROR', 'Failed to refresh token: ' . $e->getMessage());
+                    return false;
+                }
+            }
+            
+            $this->log('DEBUG', 'No refresh token available');
+            return false;
+        }
+
+        $this->log('DEBUG', 'Already authenticated');
+        return true;
     }
 
     /**
@@ -163,6 +258,7 @@ class GoogleCalendarManager
     public function setCalendar(string $calendarId): void
     {
         $this->calendarId = $calendarId;
+        $this->log('INFO', 'Calendar set', ['calendarId' => $calendarId]);
     }
 
     /**
@@ -172,20 +268,27 @@ class GoogleCalendarManager
      */
     public function getCalendars(): array
     {
-        $this->refreshTokenIfNeeded();
-        $calendars = [];
-        $calendarList = $this->service->calendarList->listCalendarList();
+        $this->log('DEBUG', 'Getting available calendars');
+        
+        try {
+            $calendars = [];
+            $calendarList = $this->service->calendarList->listCalendarList();
 
-        foreach ($calendarList->getItems() as $calendar) {
-            $calendars[] = [
-                'id' => $calendar->getId(),
-                'summary' => $calendar->getSummary(),
-                'description' => $calendar->getDescription(),
-                'timeZone' => $calendar->getTimeZone()
-            ];
+            foreach ($calendarList->getItems() as $calendar) {
+                $calendars[] = [
+                    'id' => $calendar->getId(),
+                    'summary' => $calendar->getSummary(),
+                    'description' => $calendar->getDescription(),
+                    'timeZone' => $calendar->getTimeZone()
+                ];
+            }
+
+            $this->log('INFO', 'Retrieved calendars', ['count' => count($calendars)]);
+            return $calendars;
+        } catch (\Exception $e) {
+            $this->log('ERROR', 'Failed to get calendars: ' . $e->getMessage());
+            throw new RuntimeException('Failed to get calendars: ' . $e->getMessage());
         }
-
-        return $calendars;
     }
 
     /**
@@ -198,22 +301,35 @@ class GoogleCalendarManager
     public function createEvent(array $eventData): array
     {
         if (!$this->calendarId) {
+            $this->log('ERROR', 'No calendar selected');
             throw new \RuntimeException('No calendar selected. Please select a calendar first.');
         }
 
         try {
             // Ensure required fields are present
             if (!isset($eventData['start']) || !isset($eventData['end'])) {
+                $this->log('ERROR', 'Missing required fields', ['missing' => 'start/end']);
                 throw new \InvalidArgumentException('Event must have start and end times');
             }
 
             if (!isset($eventData['summary'])) {
+                $this->log('ERROR', 'Missing required fields', ['missing' => 'summary']);
                 throw new \InvalidArgumentException('Event must have a summary');
             }
+
+            $this->log('DEBUG', 'Creating event', [
+                'calendarId' => $this->calendarId,
+                'summary' => $eventData['summary']
+            ]);
 
             // Create the event
             $event = new \Google_Service_Calendar_Event($eventData);
             $createdEvent = $this->service->events->insert($this->calendarId, $event);
+
+            $this->log('INFO', 'Event created successfully', [
+                'eventId' => $createdEvent->getId(),
+                'summary' => $createdEvent->getSummary()
+            ]);
 
             // Convert the response to an array
             return [
@@ -232,6 +348,7 @@ class GoogleCalendarManager
                 'htmlLink' => $createdEvent->getHtmlLink()
             ];
         } catch (\Exception $e) {
+            $this->log('ERROR', 'Failed to create event: ' . $e->getMessage());
             throw new \RuntimeException('Failed to create event: ' . $e->getMessage());
         }
     }
@@ -247,7 +364,10 @@ class GoogleCalendarManager
     public function updateEvent(string $eventId, array $eventData): bool
     {
         $this->validateCalendarId();
-        $this->refreshTokenIfNeeded();
+        $this->log('DEBUG', 'Updating event', [
+            'calendarId' => $this->calendarId,
+            'eventId' => $eventId
+        ]);
 
         $event = $this->service->events->get($this->calendarId, $eventId);
         foreach ($eventData as $key => $value) {
@@ -258,6 +378,9 @@ class GoogleCalendarManager
         }
 
         $this->service->events->update($this->calendarId, $eventId, $event);
+        $this->log('INFO', 'Event updated successfully', [
+            'eventId' => $eventId
+        ]);
         return true;
     }
 
@@ -271,8 +394,15 @@ class GoogleCalendarManager
     public function deleteEvent(string $eventId): bool
     {
         $this->validateCalendarId();
-        $this->refreshTokenIfNeeded();
+        $this->log('DEBUG', 'Deleting event', [
+            'calendarId' => $this->calendarId,
+            'eventId' => $eventId
+        ]);
+
         $this->service->events->delete($this->calendarId, $eventId);
+        $this->log('INFO', 'Event deleted successfully', [
+            'eventId' => $eventId
+        ]);
         return true;
     }
 
@@ -286,8 +416,16 @@ class GoogleCalendarManager
     public function getEvent(string $eventId): array
     {
         $this->validateCalendarId();
-        $this->refreshTokenIfNeeded();
+        $this->log('DEBUG', 'Getting event', [
+            'calendarId' => $this->calendarId,
+            'eventId' => $eventId
+        ]);
+
         $event = $this->service->events->get($this->calendarId, $eventId);
+
+        $this->log('INFO', 'Event retrieved successfully', [
+            'eventId' => $eventId
+        ]);
 
         return [
             'id' => $event->getId(),
@@ -313,6 +451,7 @@ class GoogleCalendarManager
     public function listEvents(\DateTime $startDate, \DateTime $endDate): array
     {
         if (!$this->calendarId) {
+            $this->log('ERROR', 'No calendar selected');
             throw new \RuntimeException('No calendar selected. Please select a calendar first.');
         }
 
@@ -323,6 +462,12 @@ class GoogleCalendarManager
                 'timeMin' => $startDate->format('c'),
                 'timeMax' => $endDate->format('c')
             ];
+
+            $this->log('DEBUG', 'Listing events', [
+                'calendarId' => $this->calendarId,
+                'timeMin' => $optParams['timeMin'],
+                'timeMax' => $optParams['timeMax']
+            ]);
 
             $results = $this->service->events->listEvents($this->calendarId, $optParams);
             $events = [];
@@ -353,8 +498,10 @@ class GoogleCalendarManager
                 $events[] = $eventArray;
             }
 
+            $this->log('INFO', 'Events retrieved', ['count' => count($events)]);
             return $events;
         } catch (\Exception $e) {
+            $this->log('ERROR', 'Failed to list events: ' . $e->getMessage());
             throw new \RuntimeException('Failed to list events: ' . $e->getMessage());
         }
     }
@@ -367,23 +514,18 @@ class GoogleCalendarManager
     private function validateCalendarId(): void
     {
         if (empty($this->calendarId)) {
+            $this->log('ERROR', 'No calendar selected');
             throw new RuntimeException('No calendar selected. Call setCalendar() first.');
         }
     }
 
     /**
-     * Validate event data contains required fields.
-     *
-     * @param array $eventData The event data to validate
-     * @throws InvalidArgumentException If required fields are missing
+     * Destructor to close log file handle
      */
-    private function validateEventData(array $eventData): void
+    public function __destruct()
     {
-        $requiredFields = ['summary', 'start', 'end'];
-        foreach ($requiredFields as $field) {
-            if (!isset($eventData[$field])) {
-                throw new InvalidArgumentException("Missing required field: {$field}");
-            }
+        if ($this->logHandle) {
+            fclose($this->logHandle);
         }
     }
 }
