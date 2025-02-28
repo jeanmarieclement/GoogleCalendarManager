@@ -10,9 +10,10 @@ A PHP class for managing Google Calendar events using the official Google API.
 
 ## Installation
 
-1. Install via Composer:
+1. Install:
+download source, then
 ```bash
-composer require app/google-calendar-manager
+composer install
 ```
 
 2. Set up Google Calendar API:
@@ -26,11 +27,12 @@ composer require app/google-calendar-manager
 
 ```php
 // Initialize the manager
-$calendar = new GoogleCalendarManager(
-    '/path/to/credentials.json',
-    '/path/to/token.json',
-    'primary' // Optional default calendar ID
-);
+$calendar = new GoogleCalendarManager([
+    'client_id' => 'YOUR_CLIENT_ID',
+    'client_secret' => 'YOUR_CLIENT_SECRET',
+    'redirect_uri' => 'urn:ietf:wg:oauth:2.0:oob', // For desktop applications
+    'token_path' => __DIR__ . '/token',
+], 'primary');
 
 // List available calendars
 $calendars = $calendar->getCalendars();
