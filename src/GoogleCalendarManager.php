@@ -74,6 +74,13 @@ class GoogleCalendarManager
         $this->client->setAccessType('offline');
         $this->client->setPrompt('consent');
 
+        // Configure SSL verification (can be disabled in test environment)
+        if (isset($this->config['verify_ssl']) && $this->config['verify_ssl'] === false) {
+            $this->client->setHttpClient(
+                new \GuzzleHttp\Client(['verify' => false])
+            );
+        }
+
         // Try to load existing token
         if (isset($this->config['token_path']) && file_exists($this->config['token_path'])) {
             $accessToken = json_decode(file_get_contents($this->config['token_path']), true);
@@ -182,23 +189,51 @@ class GoogleCalendarManager
     }
 
     /**
-     * Create a new event in the calendar.
+     * Create a new event in the selected calendar
      *
-     * @param array $eventData Event data
-     * @return string The created event ID
-     * @throws InvalidArgumentException If required fields are missing
-     * @throws RuntimeException If no calendar is selected
+     * @param array $eventData The event data
+     * @return array The created event
+     * @throws \Exception If calendar is not selected or event creation fails
      */
-    public function createEvent(array $eventData): string
+    public function createEvent(array $eventData): array
     {
-        $this->validateCalendarId();
-        $this->validateEventData($eventData);
-        $this->refreshTokenIfNeeded();
+        if (!$this->calendarId) {
+            throw new \RuntimeException('No calendar selected. Please select a calendar first.');
+        }
 
-        $event = new Google_Service_Calendar_Event($eventData);
-        $createdEvent = $this->service->events->insert($this->calendarId, $event);
+        try {
+            // Ensure required fields are present
+            if (!isset($eventData['start']) || !isset($eventData['end'])) {
+                throw new \InvalidArgumentException('Event must have start and end times');
+            }
 
-        return $createdEvent->getId();
+            if (!isset($eventData['summary'])) {
+                throw new \InvalidArgumentException('Event must have a summary');
+            }
+
+            // Create the event
+            $event = new \Google_Service_Calendar_Event($eventData);
+            $createdEvent = $this->service->events->insert($this->calendarId, $event);
+
+            // Convert the response to an array
+            return [
+                'id' => $createdEvent->getId(),
+                'summary' => $createdEvent->getSummary(),
+                'description' => $createdEvent->getDescription(),
+                'start' => [
+                    'dateTime' => $createdEvent->getStart()->getDateTime(),
+                    'timeZone' => $createdEvent->getStart()->getTimeZone()
+                ],
+                'end' => [
+                    'dateTime' => $createdEvent->getEnd()->getDateTime(),
+                    'timeZone' => $createdEvent->getEnd()->getTimeZone()
+                ],
+                'status' => $createdEvent->getStatus(),
+                'htmlLink' => $createdEvent->getHtmlLink()
+            ];
+        } catch (\Exception $e) {
+            throw new \RuntimeException('Failed to create event: ' . $e->getMessage());
+        }
     }
 
     /**
@@ -268,49 +303,60 @@ class GoogleCalendarManager
     }
 
     /**
-     * List events in the calendar.
+     * List events in the selected calendar
      *
-     * @param string|\DateTime|null $timeMin Start time (RFC3339 timestamp or DateTime object)
-     * @param string|\DateTime|null $timeMax End time (RFC3339 timestamp or DateTime object)
-     * @param int $maxResults Maximum number of events to return
+     * @param DateTime $startDate Start date
+     * @param DateTime $endDate End date
      * @return array List of events
-     * @throws RuntimeException If no calendar is selected
+     * @throws RuntimeException If no calendar is selected or if the request fails
      */
-    public function listEvents($timeMin = null, $timeMax = null, int $maxResults = 10): array
+    public function listEvents(\DateTime $startDate, \DateTime $endDate): array
     {
-        $this->validateCalendarId();
-        $this->refreshTokenIfNeeded();
-
-        $optParams = [
-            'maxResults' => $maxResults,
-            'orderBy' => 'startTime',
-            'singleEvents' => true
-        ];
-
-        if ($timeMin) {
-            $optParams['timeMin'] = $timeMin instanceof \DateTime 
-                ? $timeMin->format('c') // RFC3339 format
-                : $timeMin;
-        }
-        if ($timeMax) {
-            $optParams['timeMax'] = $timeMax instanceof \DateTime 
-                ? $timeMax->format('c') // RFC3339 format
-                : $timeMax;
+        if (!$this->calendarId) {
+            throw new \RuntimeException('No calendar selected. Please select a calendar first.');
         }
 
-        $results = $this->service->events->listEvents($this->calendarId, $optParams);
-        $events = [];
-
-        foreach ($results->getItems() as $event) {
-            $events[] = [
-                'id' => $event->getId(),
-                'summary' => $event->getSummary(),
-                'start' => $event->getStart()->getDateTime(),
-                'end' => $event->getEnd()->getDateTime()
+        try {
+            $optParams = [
+                'orderBy' => 'startTime',
+                'singleEvents' => true,
+                'timeMin' => $startDate->format('c'),
+                'timeMax' => $endDate->format('c')
             ];
-        }
 
-        return $events;
+            $results = $this->service->events->listEvents($this->calendarId, $optParams);
+            $events = [];
+
+            foreach ($results->getItems() as $event) {
+                $eventArray = [
+                    'id' => $event->getId(),
+                    'summary' => $event->getSummary(),
+                    'description' => $event->getDescription(),
+                    'start' => [
+                        'dateTime' => $event->getStart()->getDateTime(),
+                        'date' => $event->getStart()->getDate(),
+                        'timeZone' => $event->getStart()->getTimeZone()
+                    ],
+                    'end' => [
+                        'dateTime' => $event->getEnd()->getDateTime(),
+                        'date' => $event->getEnd()->getDate(),
+                        'timeZone' => $event->getEnd()->getTimeZone()
+                    ],
+                    'status' => $event->getStatus(),
+                    'htmlLink' => $event->getHtmlLink()
+                ];
+
+                // Remove null values
+                $eventArray['start'] = array_filter($eventArray['start']);
+                $eventArray['end'] = array_filter($eventArray['end']);
+                
+                $events[] = $eventArray;
+            }
+
+            return $events;
+        } catch (\Exception $e) {
+            throw new \RuntimeException('Failed to list events: ' . $e->getMessage());
+        }
     }
 
     /**

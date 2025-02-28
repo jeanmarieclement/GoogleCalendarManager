@@ -11,3 +11,4 @@ token.json
 devbook.md
 TODO.md
 config/calendar-config.php
+.phpunit*

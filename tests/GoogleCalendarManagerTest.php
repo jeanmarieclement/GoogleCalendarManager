@@ -9,6 +9,8 @@ use Google_Service_Calendar_Event;
 use Google_Service_Calendar_Events;
 use Google_Service_Calendar_CalendarList;
 use Google_Service_Calendar_CalendarListEntry;
+use Google_Service_Calendar_EventDateTime;
+use Google_Service_Calendar_EventCreator;
 use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
@@ -44,38 +46,60 @@ class GoogleCalendarManagerTest extends TestCase
             'refresh_token' => 'test_refresh_token'
         ]));
 
-        // Create mock Google client
-        $this->mockClient = $this->createMock(Google_Client::class);
-        $this->mockService = $this->createMock(Google_Service_Calendar::class);
+        // Create and configure mock client
+        $this->mockClient = $this->getMockBuilder(Google_Client::class)
+            ->disableOriginalConstructor()
+            ->getMock();
 
-        // Setup mock client expectations
-        $this->mockClient->expects($this->any())
-            ->method('setApplicationName')
-            ->willReturn(null);
-        $this->mockClient->expects($this->any())
-            ->method('setScopes')
-            ->willReturn(null);
-        $this->mockClient->expects($this->any())
-            ->method('setAuthConfig')
-            ->willReturn(null);
-        $this->mockClient->expects($this->any())
-            ->method('setAccessType')
-            ->willReturn(null);
-        $this->mockClient->expects($this->any())
-            ->method('setPrompt')
-            ->willReturn(null);
-        $this->mockClient->expects($this->any())
-            ->method('isAccessTokenExpired')
-            ->willReturn(false);
+        $this->mockClient->method('setClientId')->willReturnSelf();
+        $this->mockClient->method('setClientSecret')->willReturnSelf();
+        $this->mockClient->method('setRedirectUri')->willReturnSelf();
+        $this->mockClient->method('setScopes')->willReturnSelf();
+        $this->mockClient->method('setAccessType')->willReturnSelf();
+        $this->mockClient->method('setPrompt')->willReturnSelf();
+        $this->mockClient->method('setAccessToken')->willReturnSelf();
+        $this->mockClient->method('getAccessToken')->willReturn(['access_token' => 'test_token']);
+        $this->mockClient->method('isAccessTokenExpired')->willReturn(false);
 
-        // Create calendar manager with mocked dependencies
-        $this->calendarManager = new GoogleCalendarManager(
-            $this->credentialsPath,
-            $this->tokenPath
-        );
+        // Create and configure mock service
+        $this->mockService = $this->getMockBuilder(Google_Service_Calendar::class)
+            ->disableOriginalConstructor()
+            ->getMock();
 
-        // Inject mock service
+        // Setup mock events service
+        $mockEventsService = $this->getMockBuilder(\Google_Service_Calendar_Resource_Events::class)
+            ->disableOriginalConstructor()
+            ->getMock();
+        
+        $this->mockService->events = $mockEventsService;
+
+        // Setup mock calendar list service
+        $mockCalendarListService = $this->getMockBuilder(\Google_Service_Calendar_Resource_CalendarList::class)
+            ->disableOriginalConstructor()
+            ->getMock();
+        
+        $this->mockService->calendarList = $mockCalendarListService;
+
+        // Create calendar manager with test configuration
+        $config = [
+            'client_id' => 'test_client_id',
+            'client_secret' => 'test_client_secret',
+            'redirect_uris' => ['http://localhost'],
+            'token_path' => $this->tokenPath,
+            'scopes' => [Google_Service_Calendar::CALENDAR],
+            'redirect_uri' => 'http://localhost',
+            'verify_ssl' => false
+        ];
+
+        $this->calendarManager = new GoogleCalendarManager($config);
+
+        // Inject mock client and service
         $reflection = new \ReflectionClass($this->calendarManager);
+        
+        $clientProperty = $reflection->getProperty('client');
+        $clientProperty->setAccessible(true);
+        $clientProperty->setValue($this->calendarManager, $this->mockClient);
+
         $serviceProperty = $reflection->getProperty('service');
         $serviceProperty->setAccessible(true);
         $serviceProperty->setValue($this->calendarManager, $this->mockService);
@@ -100,34 +124,22 @@ class GoogleCalendarManagerTest extends TestCase
     public function testGetCalendars()
     {
         // Create mock calendar list
-        $mockCalendarList = $this->createMock(Google_Service_Calendar_CalendarList::class);
-        $mockCalendarEntry = $this->createMock(Google_Service_Calendar_CalendarListEntry::class);
+        $mockCalendarList = new Google_Service_Calendar_CalendarList();
+        $mockCalendarEntry = new Google_Service_Calendar_CalendarListEntry();
+        
+        // Setup mock calendar entry data
+        $mockCalendarEntry->setId('test_calendar_id');
+        $mockCalendarEntry->setSummary('Test Calendar');
+        $mockCalendarEntry->setDescription('Test Description');
+        $mockCalendarEntry->setTimeZone('Europe/Rome');
+        
+        $mockCalendarList->setItems([$mockCalendarEntry]);
 
-        // Setup mock calendar entry
-        $mockCalendarEntry->expects($this->once())
-            ->method('getId')
-            ->willReturn('test_calendar_id');
-        $mockCalendarEntry->expects($this->once())
-            ->method('getSummary')
-            ->willReturn('Test Calendar');
-        $mockCalendarEntry->expects($this->once())
-            ->method('getDescription')
-            ->willReturn('Test Description');
-        $mockCalendarEntry->expects($this->once())
-            ->method('getTimeZone')
-            ->willReturn('Europe/Rome');
-
-        // Setup mock calendar list
-        $mockCalendarList->expects($this->once())
-            ->method('getItems')
-            ->willReturn([$mockCalendarEntry]);
-
-        // Setup mock service
-        $mockCalendarList = $this->createMock(Google_Service_Calendar_CalendarList::class);
-        $this->mockService->calendarList = new \stdClass();
-        $this->mockService->calendarList->listCalendarList = function() use ($mockCalendarList) {
-            return $mockCalendarList;
-        };
+        // Setup mock calendar list service expectations
+        $this->mockService->calendarList
+            ->expects($this->once())
+            ->method('listCalendarList')
+            ->willReturn($mockCalendarList);
 
         // Test getCalendars method
         $calendars = $this->calendarManager->getCalendars();
@@ -144,26 +156,37 @@ class GoogleCalendarManagerTest extends TestCase
     public function testCreateEvent()
     {
         // Set calendar ID
-        $this->calendarManager->setCalendar('test_calendar_id');
+        $calendarId = 'test_calendar_id';
+        $this->calendarManager->setCalendar($calendarId);
 
         // Create mock event
-        $mockEvent = $this->createMock(Google_Service_Calendar_Event::class);
-        $mockEvent->expects($this->once())
-            ->method('getId')
-            ->willReturn('test_event_id');
+        $mockEvent = new Google_Service_Calendar_Event();
+        $mockEvent->setId('test_event_id');
 
-        // Setup mock service
-        $this->mockService->events = $this->createMock(\stdClass::class);
-        $this->mockService->events->expects($this->once())
-            ->method('insert')
-            ->willReturn($mockEvent);
+        // Create event data with proper DateTime objects
+        $startDateTime = new Google_Service_Calendar_EventDateTime();
+        $startDateTime->setDateTime('2025-02-20T10:00:00+01:00');
+        
+        $endDateTime = new Google_Service_Calendar_EventDateTime();
+        $endDateTime->setDateTime('2025-02-20T11:00:00+01:00');
 
-        // Test data
         $eventData = [
             'summary' => 'Test Event',
-            'start' => ['dateTime' => '2025-02-20T10:00:00+01:00'],
-            'end' => ['dateTime' => '2025-02-20T11:00:00+01:00']
+            'start' => $startDateTime,
+            'end' => $endDateTime
         ];
+
+        // Setup mock events service expectations
+        $this->mockService->events
+            ->expects($this->once())
+            ->method('insert')
+            ->with(
+                $this->equalTo($calendarId),
+                $this->callback(function($event) {
+                    return $event instanceof Google_Service_Calendar_Event;
+                })
+            )
+            ->willReturn($mockEvent);
 
         // Test createEvent method
         $eventId = $this->calendarManager->createEvent($eventData);
@@ -177,10 +200,23 @@ class GoogleCalendarManagerTest extends TestCase
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('No calendar selected. Call setCalendar() first.');
 
+        // Reset calendar ID to null
+        $reflection = new \ReflectionClass($this->calendarManager);
+        $calendarIdProperty = $reflection->getProperty('calendarId');
+        $calendarIdProperty->setAccessible(true);
+        $calendarIdProperty->setValue($this->calendarManager, null);
+
+        // Create event data with proper DateTime objects
+        $startDateTime = new Google_Service_Calendar_EventDateTime();
+        $startDateTime->setDateTime('2025-02-20T10:00:00+01:00');
+        
+        $endDateTime = new Google_Service_Calendar_EventDateTime();
+        $endDateTime->setDateTime('2025-02-20T11:00:00+01:00');
+
         $eventData = [
             'summary' => 'Test Event',
-            'start' => ['dateTime' => '2025-02-20T10:00:00+01:00'],
-            'end' => ['dateTime' => '2025-02-20T11:00:00+01:00']
+            'start' => $startDateTime,
+            'end' => $endDateTime
         ];
 
         $this->calendarManager->createEvent($eventData);
@@ -194,7 +230,7 @@ class GoogleCalendarManagerTest extends TestCase
         $this->calendarManager->setCalendar('test_calendar_id');
         $eventData = [
             'summary' => 'Test Event',
-            'end' => ['dateTime' => '2025-02-20T11:00:00+01:00']
+            'end' => new Google_Service_Calendar_EventDateTime()
         ];
 
         $this->calendarManager->createEvent($eventData);
@@ -206,14 +242,15 @@ class GoogleCalendarManagerTest extends TestCase
         $this->calendarManager->setCalendar('test_calendar_id');
 
         // Create mock event
-        $mockEvent = $this->createMock(Google_Service_Calendar_Event::class);
+        $mockEvent = new Google_Service_Calendar_Event();
         
         // Setup mock service
-        $this->mockService->events = $this->createMock(\stdClass::class);
-        $this->mockService->events->expects($this->once())
+        $this->mockService->events
+            ->expects($this->once())
             ->method('get')
             ->willReturn($mockEvent);
-        $this->mockService->events->expects($this->once())
+        $this->mockService->events
+            ->expects($this->once())
             ->method('update')
             ->willReturn($mockEvent);
 
@@ -235,8 +272,8 @@ class GoogleCalendarManagerTest extends TestCase
         $this->calendarManager->setCalendar('test_calendar_id');
 
         // Setup mock service
-        $this->mockService->events = $this->createMock(\stdClass::class);
-        $this->mockService->events->expects($this->once())
+        $this->mockService->events
+            ->expects($this->once())
             ->method('delete');
 
         // Test deleteEvent method
@@ -251,32 +288,49 @@ class GoogleCalendarManagerTest extends TestCase
         // Set calendar ID
         $this->calendarManager->setCalendar('test_calendar_id');
 
-        // Create mock event
-        $mockEvent = $this->createMock(Google_Service_Calendar_Event::class);
-        $mockEvent->expects($this->once())->method('getId')->willReturn('test_event_id');
-        $mockEvent->expects($this->once())->method('getSummary')->willReturn('Test Event');
-        $mockEvent->expects($this->once())->method('getDescription')->willReturn('Test Description');
-        $mockEvent->expects($this->once())->method('getStart')->willReturn(['dateTime' => '2025-02-20T10:00:00+01:00']);
-        $mockEvent->expects($this->once())->method('getEnd')->willReturn(['dateTime' => '2025-02-20T11:00:00+01:00']);
-        $mockEvent->expects($this->once())->method('getLocation')->willReturn('Test Location');
-        $mockEvent->expects($this->once())->method('getCreator')->willReturn(['email' => 'test@example.com']);
-        $mockEvent->expects($this->once())->method('getCreated')->willReturn('2025-02-19T19:22:39+01:00');
-        $mockEvent->expects($this->once())->method('getUpdated')->willReturn('2025-02-19T19:22:39+01:00');
+        // Create mock event with all required properties
+        $mockEvent = new Google_Service_Calendar_Event();
+        $mockEvent->setId('test_event_id');
+        $mockEvent->setSummary('Test Event');
+        $mockEvent->setDescription('Test Description');
+
+        // Set start and end times
+        $startDateTime = new Google_Service_Calendar_EventDateTime();
+        $startDateTime->setDateTime('2025-02-20T10:00:00+01:00');
+        $mockEvent->setStart($startDateTime);
+
+        $endDateTime = new Google_Service_Calendar_EventDateTime();
+        $endDateTime->setDateTime('2025-02-20T11:00:00+01:00');
+        $mockEvent->setEnd($endDateTime);
+
+        $mockEvent->setLocation('Test Location');
+
+        // Create and set creator
+        $creator = new Google_Service_Calendar_EventCreator();
+        $creator->setEmail('test@example.com');
+        $mockEvent->setCreator($creator);
+
+        $mockEvent->setCreated('2025-02-19T19:22:39+01:00');
+        $mockEvent->setUpdated('2025-02-19T19:22:39+01:00');
 
         // Setup mock service
-        $this->mockService->events = $this->createMock(\stdClass::class);
-        $this->mockService->events->expects($this->once())
+        $this->mockService->events
+            ->expects($this->once())
             ->method('get')
             ->willReturn($mockEvent);
 
         // Test getEvent method
         $event = $this->calendarManager->getEvent('test_event_id');
 
-        // Assert result
-        $this->assertIsArray($event);
+        // Assert event properties
         $this->assertEquals('test_event_id', $event['id']);
         $this->assertEquals('Test Event', $event['summary']);
         $this->assertEquals('Test Description', $event['description']);
+        $this->assertEquals('2025-02-20T10:00:00+01:00', $event['start']['dateTime']);
+        $this->assertEquals('2025-02-20T11:00:00+01:00', $event['end']['dateTime']);
         $this->assertEquals('Test Location', $event['location']);
+        $this->assertEquals('test@example.com', $event['creator']['email']);
+        $this->assertEquals('2025-02-19T19:22:39+01:00', $event['created']);
+        $this->assertEquals('2025-02-19T19:22:39+01:00', $event['updated']);
     }
 }
