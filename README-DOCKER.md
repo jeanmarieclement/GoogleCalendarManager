@@ -1,65 +1,64 @@
-# Docker Setup per Google Calendar Manager
+# Docker Setup for Google Calendar Manager
 
-Questo documento spiega come utilizzare Docker per testare la libreria Google Calendar Manager.
+This document explains how to use Docker to test the Google Calendar Manager library.
 
-## Prerequisiti
+## Prerequisites
 
-- Docker installato sul tuo sistema
-- Docker Compose installato sul tuo sistema
+- Docker installed on your system
+- Docker Compose installed on your system
 
-## Avvio dell'ambiente di test
+## Starting the Test Environment
 
-1. Assicurati di essere nella directory principale del progetto:
+1. Make sure you are in the project's root directory:
 
 ```bash
 cd /path/to/classGoogleCalendar
 ```
 
-2. Avvia i container Docker:
+2. Start the Docker containers:
 
 ```bash
 docker-compose -f compose.yml up -d
 ```
 
-3. Accedi all'applicazione di esempio tramite browser:
+3. Access the example application through your browser:
 
 ```
 http://localhost:8080
 ```
 
-## Struttura dell'ambiente Docker
+## Docker Environment Structure
 
-- **App Container**: Un server Apache con PHP 7.4 che esegue l'applicazione
-- Il container monta la directory del progetto come volume, quindi le modifiche ai file sono immediatamente visibili
-- La directory `examples` è configurata come document root di Apache
+- **App Container**: An Apache server with PHP 7.4 running the application
+- The container mounts the project directory as a volume, so file changes are immediately visible
+- The `examples` directory is configured as Apache's document root
 
-## Configurazione
+## Configuration
 
-- Il file `config/calendar-config.php` viene creato automaticamente dal template se non esiste
-- Le directory per token, logs e cache vengono create automaticamente con i permessi corretti
+- The `config/calendar-config.php` file is automatically created from the template if it doesn't exist
+- Directories for tokens, logs, and cache are automatically created with the correct permissions
 
-## Risoluzione dei problemi
+## Troubleshooting
 
-Se riscontri problemi con l'autenticazione OAuth:
+If you encounter OAuth authentication issues:
 
-1. Verifica che le credenziali OAuth nel file `config/calendar-config.php` siano corrette
-2. Assicurati che l'URI di reindirizzamento nelle impostazioni del progetto Google Cloud sia impostato su `urn:ietf:wg:oauth:2.0:oob`
-3. Controlla i log di Apache:
+1. Verify that the OAuth credentials in `config/calendar-config.php` are correct
+2. Make sure the redirect URI in the Google Cloud project settings is set to `urn:ietf:wg:oauth:2.0:oob`
+3. Check Apache logs:
 
 ```bash
 docker logs google-calendar-manager
 ```
 
-## Arresto dell'ambiente
+## Stopping the Environment
 
-Per fermare i container:
+To stop the containers:
 
 ```bash
 docker-compose -f compose.yml down
 ```
 
-Per fermare e rimuovere tutti i container, le reti e i volumi:
+To stop and remove all containers, networks, and volumes:
 
 ```bash
 docker-compose -f compose.yml down -v
-```
