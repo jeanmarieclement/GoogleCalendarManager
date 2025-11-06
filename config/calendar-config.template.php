@@ -29,10 +29,18 @@ return [
     ],
 
     // Token Storage
-    'token_path' => __DIR__ . '/../token.json',
+    'token_path' => __DIR__ . '/../token/token.json',
+
+    // Encryption key for token storage (32 bytes)
+    // Generate with: base64_encode(random_bytes(32))
+    // IMPORTANT: Store this securely in environment variables in production
+    'encryption_key' => null, // Set to base64_decode('YOUR_BASE64_ENCODED_KEY') or use env variable
 
     // Application name as shown to Google and users
     'application_name' => 'My Calendar Application',
+
+    // Debug mode (set to false in production)
+    'debug' => false,
 
     // Timezone for events (default to Europe/Rome)
     'timezone' => 'Europe/Rome',

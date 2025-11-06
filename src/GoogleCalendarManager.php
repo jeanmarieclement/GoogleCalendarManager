@@ -32,6 +32,9 @@ class GoogleCalendarManager
     /** @var array */
     private $config;
 
+    /** @var TokenEncryption|null */
+    private $tokenEncryption = null;
+
     /**
      * @var resource|null Log file handle
      */
@@ -95,19 +98,32 @@ class GoogleCalendarManager
         }
 
         $this->logLevel = strtoupper($this->config['logging']['level'] ?? 'ERROR');
-        
+
         if (!in_array($this->logLevel, array_keys($this->logLevels))) {
             $this->logLevel = 'ERROR';
         }
 
         $logPath = $this->config['logging']['path'] ?? dirname(__DIR__, 2) . '/logs/calendar.log';
+
+        // Validate and sanitize log path to prevent path traversal
+        $logPath = $this->validateFilePath($logPath, 'logs');
+
         $logDir = dirname($logPath);
-        
+
         if (!is_dir($logDir)) {
-            mkdir($logDir, 0755, true);
+            if (!mkdir($logDir, 0750, true)) {
+                throw new RuntimeException('Failed to create log directory');
+            }
         }
 
         $this->logHandle = fopen($logPath, 'a');
+        if ($this->logHandle === false) {
+            throw new RuntimeException('Failed to open log file');
+        }
+
+        // Set restrictive permissions on log file
+        chmod($logPath, 0640);
+
         $this->log('DEBUG', 'Logging initialized with level: ' . $this->logLevel);
     }
 
@@ -151,19 +167,43 @@ class GoogleCalendarManager
         $this->client->setAccessType('offline');
         $this->client->setPrompt('consent');
 
-        // Configure SSL verification (can be disabled in test environment)
-        if (isset($this->config['verify_ssl']) && $this->config['verify_ssl'] === false) {
-            $this->client->setHttpClient(
-                new \GuzzleHttp\Client(['verify' => false])
-            );
-            $this->log('WARNING', 'SSL verification disabled - NOT SECURE FOR PRODUCTION');
+        // Initialize token encryption if key is provided
+        if (isset($this->config['encryption_key'])) {
+            try {
+                $this->tokenEncryption = new TokenEncryption($this->config['encryption_key']);
+            } catch (\Exception $e) {
+                $this->log('WARNING', 'Token encryption initialization failed: ' . $e->getMessage());
+            }
         }
 
         // Try to load existing token
-        if (isset($this->config['token_path']) && file_exists($this->config['token_path'])) {
-            $accessToken = json_decode(file_get_contents($this->config['token_path']), true);
-            $this->client->setAccessToken($accessToken);
-            $this->log('DEBUG', 'Loaded existing token');
+        if (isset($this->config['token_path'])) {
+            $tokenPath = $this->validateFilePath($this->config['token_path'], 'token');
+
+            if (file_exists($tokenPath)) {
+                $tokenData = file_get_contents($tokenPath);
+                if ($tokenData === false) {
+                    throw new RuntimeException('Failed to read token file');
+                }
+
+                // Decrypt token if encryption is enabled
+                if ($this->tokenEncryption !== null) {
+                    try {
+                        $tokenData = $this->tokenEncryption->decrypt($tokenData);
+                    } catch (\Exception $e) {
+                        $this->log('ERROR', 'Failed to decrypt token: ' . $e->getMessage());
+                        throw new RuntimeException('Failed to decrypt token');
+                    }
+                }
+
+                $accessToken = json_decode($tokenData, true);
+                if ($accessToken === null) {
+                    throw new RuntimeException('Invalid token format');
+                }
+
+                $this->client->setAccessToken($accessToken);
+                $this->log('DEBUG', 'Loaded existing token');
+            }
         }
 
         $this->service = new Google_Service_Calendar($this->client);
@@ -189,21 +229,23 @@ class GoogleCalendarManager
     public function handleAuthCallback(string $authCode): void
     {
         $this->log('DEBUG', 'Handling auth callback');
-        
+
         try {
             $accessToken = $this->client->fetchAccessTokenWithAuthCode($authCode);
+
+            if (isset($accessToken['error'])) {
+                throw new RuntimeException('OAuth error: ' . ($accessToken['error_description'] ?? 'Unknown error'));
+            }
+
             $this->client->setAccessToken($accessToken);
 
             // Save the token for future use
             if (isset($this->config['token_path'])) {
-                if (!file_put_contents($this->config['token_path'], json_encode($accessToken))) {
-                    throw new RuntimeException('Failed to save the token');
-                }
-                $this->log('DEBUG', 'Token saved to: ' . $this->config['token_path']);
+                $this->saveToken($accessToken);
             }
         } catch (\Exception $e) {
             $this->log('ERROR', 'Authentication failed: ' . $e->getMessage());
-            throw new RuntimeException('Error handling auth callback: ' . $e->getMessage());
+            throw new RuntimeException('Authentication failed');
         }
         $this->log('INFO', 'Authentication successful');
     }
@@ -222,7 +264,7 @@ class GoogleCalendarManager
 
         if ($this->client->isAccessTokenExpired()) {
             $this->log('DEBUG', 'Access token expired');
-            
+
             // Try to refresh the token
             if ($this->client->getRefreshToken()) {
                 $this->log('DEBUG', 'Attempting to refresh token');
@@ -230,17 +272,16 @@ class GoogleCalendarManager
                     $this->client->fetchAccessTokenWithRefreshToken($this->client->getRefreshToken());
                     // Save the new token
                     if (isset($this->config['token_path'])) {
-                        file_put_contents($this->config['token_path'], json_encode($this->client->getAccessToken()));
-                        $this->log('DEBUG', 'Token saved to: ' . $this->config['token_path']);
+                        $this->saveToken($this->client->getAccessToken());
                     }
                     $this->log('INFO', 'Token refreshed successfully');
                     return true;
                 } catch (Exception $e) {
-                    $this->log('ERROR', 'Failed to refresh token: ' . $e->getMessage());
+                    $this->log('ERROR', 'Failed to refresh token');
                     return false;
                 }
             }
-            
+
             $this->log('DEBUG', 'No refresh token available');
             return false;
         }
@@ -517,6 +558,88 @@ class GoogleCalendarManager
             $this->log('ERROR', 'No calendar selected');
             throw new RuntimeException('No calendar selected. Call setCalendar() first.');
         }
+    }
+
+    /**
+     * Validate and sanitize file path to prevent path traversal
+     *
+     * @param string $path The file path to validate
+     * @param string $expectedSubdir Expected subdirectory (e.g., 'logs', 'token')
+     * @return string Validated absolute path
+     * @throws RuntimeException If path is invalid or dangerous
+     */
+    private function validateFilePath(string $path, string $expectedSubdir): string
+    {
+        // Get the absolute path
+        $realPath = realpath(dirname($path));
+        $fileName = basename($path);
+
+        // If directory doesn't exist yet, use the provided path but validate it
+        if ($realPath === false) {
+            $realPath = dirname($path);
+        }
+
+        // Get the base directory of the application
+        $baseDir = realpath(dirname(__DIR__));
+
+        // Ensure the path is within the application directory
+        if (strpos($realPath, $baseDir) !== 0) {
+            throw new RuntimeException('File path must be within application directory');
+        }
+
+        // Ensure no directory traversal attempts
+        if (strpos($path, '..') !== false) {
+            throw new RuntimeException('Path traversal detected');
+        }
+
+        // Validate that it's in the expected subdirectory
+        if (strpos($realPath, $expectedSubdir) === false) {
+            throw new RuntimeException('File must be in ' . $expectedSubdir . ' directory');
+        }
+
+        return $realPath . DIRECTORY_SEPARATOR . $fileName;
+    }
+
+    /**
+     * Save token to file with optional encryption
+     *
+     * @param array $accessToken The access token to save
+     * @throws RuntimeException If save fails
+     */
+    private function saveToken(array $accessToken): void
+    {
+        $tokenPath = $this->validateFilePath($this->config['token_path'], 'token');
+        $tokenData = json_encode($accessToken);
+
+        if ($tokenData === false) {
+            throw new RuntimeException('Failed to encode token');
+        }
+
+        // Encrypt token if encryption is enabled
+        if ($this->tokenEncryption !== null) {
+            try {
+                $tokenData = $this->tokenEncryption->encrypt($tokenData);
+            } catch (\Exception $e) {
+                $this->log('ERROR', 'Failed to encrypt token');
+                throw new RuntimeException('Failed to encrypt token');
+            }
+        }
+
+        // Ensure token directory exists with secure permissions
+        $tokenDir = dirname($tokenPath);
+        if (!is_dir($tokenDir)) {
+            if (!mkdir($tokenDir, 0750, true)) {
+                throw new RuntimeException('Failed to create token directory');
+            }
+        }
+
+        // Save token with restrictive permissions
+        if (file_put_contents($tokenPath, $tokenData) === false) {
+            throw new RuntimeException('Failed to save token');
+        }
+
+        chmod($tokenPath, 0640);
+        $this->log('DEBUG', 'Token saved securely');
     }
 
     /**

@@ -3,7 +3,7 @@
     "description": "A PHP class for managing Google Calendar events",
     "type": "library",
     "require": {
-        "php": "^7.3",
+        "php": "^8.1",
         "google/apiclient": "^2.12.0"
     },
     "autoload": {

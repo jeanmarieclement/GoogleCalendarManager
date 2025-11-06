@@ -24,15 +24,18 @@ services:
         if [ ! -f /var/www/html/config/calendar-config.php ]; then
           cp /var/www/html/config/calendar-config.template.php /var/www/html/config/calendar-config.php
         fi &&
-        # Ensure token directory is writable
+        # Ensure token directory exists with secure permissions
         mkdir -p /var/www/html/token &&
-        chmod -R 777 /var/www/html/token &&
-        # Create logs directory
+        chown -R www-data:www-data /var/www/html/token &&
+        chmod -R 750 /var/www/html/token &&
+        # Create logs directory with secure permissions
         mkdir -p /var/www/html/logs &&
-        chmod -R 777 /var/www/html/logs &&
-        # Create cache directory
+        chown -R www-data:www-data /var/www/html/logs &&
+        chmod -R 750 /var/www/html/logs &&
+        # Create cache directory with secure permissions
         mkdir -p /var/www/html/cache &&
-        chmod -R 777 /var/www/html/cache &&
+        chown -R www-data:www-data /var/www/html/cache &&
+        chmod -R 750 /var/www/html/cache &&
         # Start Apache
         apache2-foreground
       "

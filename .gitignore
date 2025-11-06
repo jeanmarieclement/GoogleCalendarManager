@@ -3,6 +3,9 @@
 .env
 credentials.json
 token.json
+token/
+logs/
+cache/
 .idea/
 .vscode/
 *.log
